@@ -29,13 +29,8 @@ cmake ..
 make
 ./test_infer
 ```
-# Comparison of results
-Results on 500 images test set
-| | CPU  | ONNXRuntime-gpu  | TensorRT
-----| ---- | ---- | ----  
- Inference time/ms  | 2245 | 35 |8
- Acceleration ratio  | 1 | 64 |281
- 
+# Results
+![image1](https://www.baidu.com/img/bd_logo1.png)
 # Maintainers
 [@JHC521PJJ](https://github.com/JHC521PJJ).
 # License
