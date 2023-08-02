@@ -1,7 +1,5 @@
 ﻿#include "matchTemplateGpu.cuh"
-#include "time_count.h"
 #include <cuda_runtime_api.h>
-#include <thrust/device_vector.h>
 #include <thrust/extrema.h>
 #include <thrust/device_ptr.h>
 #include <stdio.h>
@@ -11,6 +9,7 @@ using uchar = unsigned char;
 
 constexpr int block_size = 16;
 // __constant__ float d_templ[221 * 221];
+
 
 __global__ void convertToFloatKernel(unsigned char* d_input, float* d_output, 
     const int width, const int height) {
@@ -24,25 +23,6 @@ __global__ void convertToFloatKernel(unsigned char* d_input, float* d_output,
         d_output[index + 2] = (float)d_input[index + 2] / 255.0f;
     }
 }
-
-// __global__ void matchTemplate(const cv::cudev::PtrStepSz<uchar> img, 
-//     const cv::cudev::PtrStepSz<uchar> templ, 
-//     cv::cudev::PtrStepSz<float> result) {
-
-//     const int x = blockDim.x * blockIdx.x + threadIdx.x;
-//     const int y = blockDim.y * blockIdx.y + threadIdx.y;
-
-//     if((x < result.cols) && (y < result.rows)){
-//         long sum = 0;
-//         for(int yy = 0; yy < templ.rows; yy++){
-//             for(int xx = 0; xx < templ.cols; xx++){
-//                 int diff = (img.ptr((y + yy))[x + xx] - templ.ptr(yy)[xx]);
-//                 sum += (diff*diff);
-//             }
-//         }
-//         result.ptr(y)[x] = sum;
-//     }
-// }
 
 __global__ void matchTemplateKernel(const uchar* d_img, const uchar* d_templ, int* d_result,
     const int img_row, const int img_col,
@@ -218,195 +198,3 @@ void matchTemplateGpu_v2(cv::Mat& h_img, cv::Mat& h_templ, std::vector<float>& d
     cudaFree(d_templ);
     cudaFree(d_diff);
 }
-
-/*
-// use shared memory
-__global__ void matchTemplateGpu_opt
-(
-    const cv::cudev::PtrStepSz<uchar> img,
-    const cv::cudev::PtrStepSz<uchar> templ,
-    cv::cudev::PtrStepSz<float> result
-)
-{
-    const int x = blockDim.x * blockIdx.x + threadIdx.x;
-    const int y = blockDim.y * blockIdx.y + threadIdx.y;
-
-    extern __shared__ uchar temp[];
-
-    if(threadIdx.x == 0){
-        for(int yy = 0; yy < templ.rows; yy++){
-            for(int xx = 0; xx < templ.cols; xx++){
-                temp[yy*templ.cols+xx] = templ.ptr(yy)[xx];
-            }
-        }
-    }
-    __syncthreads();
-
-    if((x < result.cols) && (y < result.rows)){
-        long sum = 0;
-        for(int yy = 0; yy < templ.rows; yy++){
-            for(int xx = 0; xx < templ.cols; xx++){
-                int diff = (img.ptr((y+yy))[x+xx] - temp[yy*templ.cols+xx]);
-                sum += (diff*diff);
-            }
-        }
-        result.ptr(y)[x] = sum;
-    }
-}
-
-// use shared memory
-__global__ void matchTemplateGpu_opt2
-(
-    const cv::cudev::PtrStepSz<uchar> img,
-    const cv::cudev::PtrStepSz<uchar> templ,
-    cv::cudev::PtrStepSz<float> result
-)
-{
-    const int x = blockDim.x * blockIdx.x + threadIdx.x;
-    const int y = blockDim.y * blockIdx.y + threadIdx.y;
-
-    extern __shared__ uchar temp[];
-
-    if(threadIdx.x == 0){
-        for(int yy = 0; yy < templ.rows; yy++){
-            const uchar* ptempl = templ.ptr(yy);
-            for(int xx = 0; xx < templ.cols; xx++){
-                temp[yy*templ.cols+xx]  = __ldg(&ptempl[xx]);
-            }
-        }
-    }
-    __syncthreads();
-
-    if((x < result.cols) && (y < result.rows)){
-        long sum = 0;
-        for(int yy = 0; yy < templ.rows; yy++){
-            const uchar* pimg = img.ptr((y+yy)) + x;
-            for(int xx = 0; xx < templ.cols; xx++){
-                int diff = (__ldg(&pimg[xx]) - temp[yy*templ.cols+xx]);
-                sum += (diff*diff);
-            }
-        }
-        result.ptr(y)[x] = sum;
-    }
-}
-
-void launchMatchTemplateGpu
-(
-    cv::cuda::GpuMat& img, 
-    cv::cuda::GpuMat& templ, 
-    cv::cuda::GpuMat& result
-)
-{
-    const dim3 block(64, 2);
-    const dim3 grid(cv::cudev::divUp(result.cols, block.x), cv::cudev::divUp(result.rows, block.y));
-
-    matchTemplateGpu<<<grid, block>>>(img, templ, result);
-
-    CV_CUDEV_SAFE_CALL(cudaGetLastError());
-    CV_CUDEV_SAFE_CALL(cudaDeviceSynchronize());
-}
-
-// use shared memory
-void launchMatchTemplateGpu_opt
-(
-    cv::cuda::GpuMat& img,
-    cv::cuda::GpuMat& templ,
-    cv::cuda::GpuMat& result
-)
-{
-    const dim3 block(64, 2);
-    const dim3 grid(cv::cudev::divUp(result.cols, block.x), cv::cudev::divUp(result.rows, block.y));
-    const size_t shared_mem_size = templ.cols*templ.rows*sizeof(uchar);
-
-    matchTemplateGpu_opt<<<grid, block, shared_mem_size>>>(img, templ, result);
-
-    CV_CUDEV_SAFE_CALL(cudaGetLastError());
-    CV_CUDEV_SAFE_CALL(cudaDeviceSynchronize());
-}
-
-// use shared memory
-void launchMatchTemplateGpu_opt2
-(
-    cv::cuda::GpuMat& img,
-    cv::cuda::GpuMat& templ,
-    cv::cuda::GpuMat& result
-)
-{
-    const dim3 block(64, 2);
-    const dim3 grid(cv::cudev::divUp(result.cols, block.x), cv::cudev::divUp(result.rows, block.y));
-    const size_t shared_mem_size = templ.cols*templ.rows*sizeof(uchar);
-
-    matchTemplateGpu_opt2<<<grid, block, shared_mem_size>>>(img, templ, result);
-
-    CV_CUDEV_SAFE_CALL(cudaGetLastError());
-    CV_CUDEV_SAFE_CALL(cudaDeviceSynchronize());
-}
-
-double launchMatchTemplateGpu
-(
-    cv::cuda::GpuMat& img, 
-    cv::cuda::GpuMat& templ, 
-    cv::cuda::GpuMat& result, 
-    const int loop_num
-)
-{
-    double f = 1000.0f / cv::getTickFrequency();
-    int64 start = 0, end = 0;
-    double time = 0.0;
-    for (int i = 0; i <= loop_num; i++){
-        start = cv::getTickCount();
-        launchMatchTemplateGpu(img, templ, result);
-        end = cv::getTickCount();
-        time += (i > 0) ? ((end - start) * f) : 0;
-    }
-    time /= loop_num;
-
-    return time;
-}
-
-// use shared memory
-double launchMatchTemplateGpu_opt
-(
-    cv::cuda::GpuMat& img, 
-    cv::cuda::GpuMat& templ, 
-    cv::cuda::GpuMat& result, 
-    const int loop_num
-)
-{
-    double f = 1000.0f / cv::getTickFrequency();
-    int64 start = 0, end = 0;
-    double time = 0.0;
-    for (int i = 0; i <= loop_num; i++){
-        start = cv::getTickCount();
-        launchMatchTemplateGpu_opt(img, templ, result);
-        end = cv::getTickCount();
-        time += (i > 0) ? ((end - start) * f) : 0;
-    }
-    time /= loop_num;
-
-    return time;
-}
-
-// use shared memory + __ldg
-double launchMatchTemplateGpu_opt2
-(
-    cv::cuda::GpuMat& img, 
-    cv::cuda::GpuMat& templ, 
-    cv::cuda::GpuMat& result, 
-    const int loop_num
-)
-{
-    double f = 1000.0f / cv::getTickFrequency();
-    int64 start = 0, end = 0;
-    double time = 0.0;
-    for (int i = 0; i <= loop_num; i++){
-        start = cv::getTickCount();
-        launchMatchTemplateGpu_opt2(img, templ, result);
-        end = cv::getTickCount();
-        time += (i > 0) ? ((end - start) * f) : 0;
-    }
-    time /= loop_num;
-
-    return time;
-}
-*/
